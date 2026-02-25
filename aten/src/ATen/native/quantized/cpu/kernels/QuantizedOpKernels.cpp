@@ -1278,14 +1278,34 @@ void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd_scalar", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(out, self);
-    auto other_val = other.to<int32_t>();
+    auto other_val = other.to<int64_t>();
+    const bool overflow_int32 =
+        other_val < std::numeric_limits<int32_t>::min() ||
+        other_val > std::numeric_limits<int32_t>::max();
+    if (overflow_int32) {
+      // If the offset cannot fit in int32_t, avoid vector path to prevent overflow.
+      cpu_kernel(
+          iter,
+          [&](scalar_t a) -> scalar_t {
+            const int64_t a_sub_z = static_cast<int64_t>(a.val_) -
+                static_cast<int64_t>(self_zero_point);
+            const int64_t c = a_sub_z + other_val;
+            scalar_t res = at::native::requantize_from_int<scalar_t>(
+                multiplier, zero_point, c);
+            if constexpr (ReLUFused) {
+              res.val_ = std::max<scalar_t::underlying>(res.val_, zero_point);
+            }
+            return res;
+          });
+      return;
+    }
     auto other_vec = Vectorized<c10::qint32>(static_cast<c10::qint32>(other_val));
     cpu_kernel_vec(
         iter,
         [&](scalar_t a) -> scalar_t {
           int32_t a_sub_z = static_cast<int32_t>(a.val_) -
               static_cast<int32_t>(self_zero_point);
-          int32_t c = a_sub_z + other_val;
+          int32_t c = a_sub_z + static_cast<int32_t>(other_val);
           scalar_t res = at::native::requantize_from_int<scalar_t>(
               multiplier, zero_point, c);
           if constexpr (ReLUFused) {
