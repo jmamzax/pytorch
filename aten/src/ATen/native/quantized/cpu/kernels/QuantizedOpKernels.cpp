@@ -70,6 +70,7 @@ Tensor qcat_nhwc_kernel(
   std::vector<int64_t> zero_pts;
   std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
+  bool all_fast = true;
 
   for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(
@@ -100,9 +101,9 @@ Tensor qcat_nhwc_kernel(
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
-    is_fast_path.push_back(
-        qx.q_scale() == scale &&
-        qx.q_zero_point() == zero_point);
+    bool fast = (qx.q_scale() == scale && qx.q_zero_point() == zero_point);
+    is_fast_path.push_back(fast);
+    all_fast = all_fast && fast;
   }
 
   const int64_t N = qx0.size(0);
@@ -137,8 +138,26 @@ Tensor qcat_nhwc_kernel(
               reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
 
-          if (is_fast_path[tidx] && !ReLUFused) {
-            std::memcpy(optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
+          // Only allow the memcpy fast path when all tensors share
+          // scale/zero_point. Otherwise, force a slow path that matches
+          // scalar quantize rounding for mixed qparams.
+          if (all_fast && !ReLUFused) {
+            std::memcpy(
+                optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
+            continue;
+          }
+
+          if (!all_fast) {
+            // Scalar path: dequantize then quantize with scalar helpers to
+            // align rounding with quantize_per_tensor reference when qparams differ.
+            for (int64_t c = 0; c < curr_C; ++c) {
+              auto float_val = at::native::dequantize_val(
+                  curr_scale, curr_zero_pt, reinterpret_cast<scalar_t*>(iptr)[c]);
+              if constexpr (ReLUFused) {
+                float_val = std::max(0.0f, float_val);
+              }
+              optr[c] = at::native::quantize_val<scalar_t>(scale, zero_point, float_val).val_;
+            }
             continue;
           }
 
