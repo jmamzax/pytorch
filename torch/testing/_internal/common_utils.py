@@ -4296,6 +4296,7 @@ class TestCase(expecttest.TestCase):
         if any(
             isinstance(input, np.ndarray) and not has_corresponding_torch_dtype(input.dtype) for input in (x, y)
         ):
+            print("assertEqual any")
             def to_list(input):
                 return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
 
@@ -4305,16 +4306,21 @@ class TestCase(expecttest.TestCase):
         # Otherwise, the pair origination of `are_equal` will fail, because the sequence is recognized as container
         # that should be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
+            print("assertEqual y sequence")
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
+            print("assertEqual x sequence")
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
         # unbind NSTs to compare them; don't do this for NJTs
         if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.strided:
+            print("assertEqual x Tensor nested")
             x = x.unbind()
         if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
+            print("assertEqual y Tensor nested")
             y = y.unbind()
 
+        # print(f"{self.precision=}, {self.rel_tol=}, {rtol=}, {atol=}")
         error_metas = not_close_error_metas(
             x,
             y,
@@ -4349,7 +4355,7 @@ class TestCase(expecttest.TestCase):
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
         )
-
+        # print(f"{error_metas=}")
         if error_metas:
             # See [ErrorMeta Cycles]
             error_metas = [error_metas]  # type: ignore[list-item]

@@ -1031,9 +1031,21 @@ class TestLinalg(TestCase):
         ops = (torch.det, torch.Tensor.det,
                torch.linalg.det)
         for t in tensors:
-            expected = np.linalg.det(t.cpu().numpy())
+            t_cpu = t.cpu()
+            torch.set_printoptions(precision=16)
+            torch.set_printoptions(profile="full")
+            print(f"{t_cpu=}")
+            torch.set_printoptions(profile="default")
+            t_cpu_np = t_cpu.numpy()
+            import sys
+            np.set_printoptions(threshold=sys.maxsize)
+            print(f"{t_cpu_np=} {t_cpu_np.dtype=}")
+            np.set_printoptions(threshold=1000)
+            expected = np.linalg.det(t_cpu_np)
+            print(f"{expected=}")
             for op in ops:
                 actual = op(t)
+                print(f"{actual=}")
                 self.assertEqual(actual, expected)
                 self.compare_with_numpy(op, np.linalg.det, t)
 
@@ -9320,25 +9332,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet(self, device, dtype):
+        print(f"{dtype=}")
+        # torch.set_printoptions(profile="full")
+        torch.set_printoptions(precision=16)
         def reference_slogdet(M):
             sdet, logabsdet = np.linalg.slogdet(M.detach().cpu().numpy())
             return M.new_tensor(sdet), M.new_tensor(logabsdet)
 
         def test_single_det(M, target, desc):
             target_sdet, target_logabsdet = target
-
+            print(f"{M=}")
             det = M.det()
             logdet = M.logdet()
             sdet, logabsdet = M.slogdet()
             linalg_sdet, linalg_logabsdet = torch.linalg.slogdet(M)
 
             # Test det
+            print(f"{det=}, {(target_sdet * target_logabsdet.exp())=}")
+
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
                              atol=1e-6, rtol=0, msg=f'{desc} (det)')
 
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
+            print(f"{sdet * logabsdet.exp()=}")
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
                              atol=1e-6, rtol=0, msg=f'{desc} (slogdet)')
             self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
@@ -9363,6 +9381,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             q, _ = torch.qr(mat)
             ref_det, ref_logabsdet = reference_slogdet(q)
             test_single_det(q, (ref_det, ref_logabsdet), 'orthogonal')
+        # torch.set_printoptions(profile="default")
 
         def test(M):
             if M.size(0) < 5:

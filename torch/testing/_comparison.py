@@ -608,6 +608,7 @@ class NumberPair(Pair):
             )
 
     def compare(self) -> None:
+        # print(f"{type(self.actual)=}, {type(self.expected)=}")
         if self.check_dtype and type(self.actual) is not type(self.expected):
             self._fail(
                 AssertionError,
@@ -622,7 +623,7 @@ class NumberPair(Pair):
 
         abs_diff = abs(self.actual - self.expected)
         tolerance = self.atol + self.rtol * abs(self.expected)
-
+        print(f"{self.actual=}, {self.expected=}, {abs_diff=}, {tolerance=}")
         if cmath.isfinite(abs_diff) and abs_diff <= tolerance:
             return
 
@@ -1290,6 +1291,7 @@ def not_close_error_metas(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None  # noqa: RSE102
 
+    # print(f"{pairs=}")
     error_metas: list[ErrorMeta] = []
     for pair in pairs:
         try:
