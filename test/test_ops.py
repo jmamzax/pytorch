@@ -1609,6 +1609,20 @@ class TestCommon(TestCase):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
         device_type = torch.device(device).type
+        if device_type == "xpu" and hasattr(torch, "xpu") and torch.xpu.is_available():
+            props = torch.xpu.get_device_properties(device)
+            local_mem_kb = getattr(props, "local_mem_size", 0) // 1024
+            print(
+                f"[test_dtypes {op.name}] XPU device: {props.name}"
+                f" | total_memory={props.total_memory // 1024**2}MB"
+                f" | has_fp64={getattr(props, 'has_fp64', 'N/A')}"
+                f" | gpu_eu_count={getattr(props, 'gpu_eu_count', 'N/A')}"
+                f" | max_compute_units={getattr(props, 'max_compute_units', 'N/A')}"
+                f" | max_work_group_size={getattr(props, 'max_work_group_size', 'N/A')}"
+                f" | max_num_sub_groups={getattr(props, 'max_num_sub_groups', 'N/A')}"
+                f" | sub_group_sizes={getattr(props, 'sub_group_sizes', 'N/A')}"
+                f" | local_mem_size={local_mem_kb}KB"
+            )
         include_complex32 = (
             (torch.complex32,)
             if op.supports_dtype(torch.complex32, device_type)
@@ -1636,6 +1650,10 @@ class TestCommon(TestCase):
         for dtype in all_types_and_complex_and(
             *((torch.half, torch.bfloat16, torch.bool) + include_complex32)
         ):
+            if device_type == "xpu" and hasattr(torch, "xpu") and torch.xpu.is_available():
+                print(f"[test_dtypes {op.name}] {dtype} - allocated: {torch.xpu.memory_allocated(device) / 1024**2:.1f}MB, reserved: {torch.xpu.memory_reserved(device) / 1024**2:.1f}MB")
+            elif device_type == "cuda" and torch.cuda.is_available():
+                print(f"[test_dtypes {op.name}] {dtype} - allocated: {torch.cuda.memory_allocated(device) / 1024**2:.1f}MB, reserved: {torch.cuda.memory_reserved(device) / 1024**2:.1f}MB")
             # tries to acquire samples - failure indicates lack of support
             requires_grad = dtype in allowed_backward_dtypes
             try:
@@ -1805,6 +1823,10 @@ class TestCommon(TestCase):
             for dtype in all_claimed_but_unsupported:
                 msg += f"{dtype} - {dtype_error[dtype]}\n"
 
+        if device_type == "xpu" and hasattr(torch, "xpu") and torch.xpu.is_available():
+            print(f"[test_dtypes {op.name}] before fail - allocated: {torch.xpu.memory_allocated(device) / 1024**2:.1f}MB, reserved: {torch.xpu.memory_reserved(device) / 1024**2:.1f}MB")
+        elif device_type == "cuda" and torch.cuda.is_available():
+            print(f"[test_dtypes {op.name}] before fail - allocated: {torch.cuda.memory_allocated(device) / 1024**2:.1f}MB, reserved: {torch.cuda.memory_reserved(device) / 1024**2:.1f}MB")
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
