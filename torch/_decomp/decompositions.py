@@ -2089,6 +2089,7 @@ def native_batch_norm_helper(
     computation_dtype = utils.get_computation_dtype(input.dtype)
     new_running_mean = running_mean
     new_running_var = running_var
+    use_native_xpu_training = training and input.device.type == "xpu"
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
@@ -2097,12 +2098,25 @@ def native_batch_norm_helper(
         )
         rstd = torch.rsqrt(biased_var + eps)
 
-        output = (input - mean) * rstd
-
         save_mean = torch.squeeze(mean, reduction_dims)
         save_rstd = torch.squeeze(rstd, reduction_dims)
+        if use_native_xpu_training:
+            save_mean, save_rstd = torch.ops.aten.batch_norm_stats.default(input, eps)
+            output = torch.ops.aten.batch_norm_elemt.default(
+                input, weight, bias, save_mean, save_rstd, eps
+            )
+        else:
+            output = (input - mean) * rstd
+
         if running_mean is not None:
-            new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+            if use_native_xpu_training:
+                new_running_mean = torch.addcmul(
+                    (1 - momentum) * running_mean.to(dtype=computation_dtype),
+                    save_mean,
+                    save_mean.new_tensor(momentum),
+                ).to(dtype=running_mean.dtype)
+            else:
+                new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
             if not functional:
                 running_mean.copy_(new_running_mean)
         if running_var is not None:
@@ -2112,7 +2126,14 @@ def native_batch_norm_helper(
             # numerics probably don't matter.
             squeezed_var = torch.squeeze(biased_var, reduction_dims)
             unbiased_var = squeezed_var * (n / (n - 1))
-            new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+            if use_native_xpu_training:
+                new_running_var = torch.addcmul(
+                    (1 - momentum) * running_var.to(dtype=computation_dtype),
+                    unbiased_var,
+                    save_mean.new_tensor(momentum),
+                ).to(dtype=running_var.dtype)
+            else:
+                new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
     else:
@@ -2137,12 +2158,12 @@ def native_batch_norm_helper(
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = (input - mean) * invstd
 
-    if weight is not None:
+    if weight is not None and not use_native_xpu_training:
         weight = weight.flatten()
         weight = _unsqueeze_to_dim(weight, input.dim() - 1)
         output = output * weight
 
-    if bias is not None:
+    if bias is not None and not use_native_xpu_training:
         bias = bias.flatten()
         bias = _unsqueeze_to_dim(bias, input.dim() - 1)
         output = output + bias
