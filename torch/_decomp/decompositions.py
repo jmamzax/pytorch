@@ -2101,7 +2101,11 @@ def native_batch_norm_helper(
         save_mean = torch.squeeze(mean, reduction_dims)
         save_rstd = torch.squeeze(rstd, reduction_dims)
         if use_native_xpu_training:
-            save_mean, save_rstd = torch.ops.aten.batch_norm_stats.default(input, eps)
+            save_mean, save_var = torch.ops.aten.batch_norm_update_stats.default(
+                input, None, None, momentum
+            )
+            biased_var = save_var.reshape(biased_var.shape)
+            save_rstd = torch.rsqrt(save_var + eps)
             output = torch.ops.aten.batch_norm_elemt.default(
                 input, weight, bias, save_mean, save_rstd, eps
             )
